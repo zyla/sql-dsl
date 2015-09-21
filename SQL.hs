@@ -1,7 +1,7 @@
 {-# LANGUAGE UndecidableInstances, ConstraintKinds, GADTs, TypeFamilies, ScopedTypeVariables, FlexibleInstances, DataKinds, MultiParamTypeClasses, TypeOperators #-}
 
+import Text.Show
 import GHC.TypeLits
-import Data.Proxy
 
 data Binding (name :: Symbol) a
 data Table' (name :: Symbol) (columns :: [*])
@@ -44,22 +44,31 @@ data Operator a b c where
     Add :: Operator Int Int Int
     -- TODO
 
+opPrec :: Operator a b c -> Int
+opPrec Eq = 1
+opPrec Add = 2
+
+opString :: Operator a b c -> String
+opString Eq = "="
+opString Add = "+"
+
 data Expr (scope :: [*]) a where
     -- A constant
-    Const :: a -> Expr scope a
+    Const :: Show a -- FIXME
+          => a
+          -> Expr scope a
 
     -- Variable selector. Requires the variable to be in scope
-    Var :: (KnownSymbol name, HasVar name scope)
-        => Proxy name
+    Var :: HasVar name scope
+        => Sym name
         -> Expr scope (VarType name scope)
 
     -- Column selector "table.col". Requires table to be in scope and have given column.
-    Col :: ( KnownSymbol table, KnownSymbol col
-           , Table table columns scope
+    Col :: ( Table table columns scope
            , HasVar col columns
            )
-        => Proxy table
-        -> Proxy col
+        => Sym table
+        -> Sym col
         -> Expr scope (VarType col columns)
 
     -- Operator. Reuires types to match.
@@ -71,27 +80,69 @@ data Expr (scope :: [*]) a where
     -- Subquery. Requires the query to have only one column.
     SubSelect :: Select scope '[Binding whatever a] -> Expr scope (Maybe a)
 
+instance Show (Expr scope a) where
+    showsPrec p (Const x) = showsPrec p x
+    showsPrec _ (Var name) = showSymbol name
+    showsPrec _ (Col table col) = showSymbol table . showChar '.' . showSymbol col
+    showsPrec p (Op operator a b) =
+        let prec = opPrec operator
+        in showParen (p > prec) $
+            showsPrec prec a . showChar ' ' .
+            showString (opString operator) . showChar ' ' .
+            showsPrec prec b
+
 data Columns (scope :: [*]) (bindings :: [*]) where
     ColNil :: Columns scope '[]
-    ColCons :: KnownSymbol name
-            => Proxy name
+    ColCons :: Sym name
             -> Expr scope a
             -> Columns scope bindings
             -> Columns scope (Binding name a ': bindings)
 
+instance Show (Columns scope (b ': bs)) where
+    showsPrec p (ColCons name expr ColNil) = showsPrec p expr . showString " AS " . showSymbol name
+    showsPrec p (ColCons name expr xs@ColCons{}) =
+        showsPrec p expr . showString " AS " . showSymbol name .
+        showString ", " . showsPrec p xs
+
+showSymbol :: Sym sym -> ShowS
+showSymbol sym@Sym = showString $ symbolVal sym
+
+data Sym (val :: Symbol) where
+    Sym :: KnownSymbol val => Sym val
+
 data OrderBy scope = forall a. Asc (Expr scope a) | forall a. Desc (Expr scope a)
+
+instance Show (OrderBy scope) where
+    showsPrec p (Asc expr) = showsPrec p expr . showString " ASC"
+    showsPrec p (Desc expr) = showsPrec p expr . showString " DESC"
 
 data Select (scope :: [*]) (a :: [*]) where
     Select :: ( Table table tableColumns scope
               , selectScope ~ (Table' tableAlias tableColumns ': (tableColumns ++ scope))
               , orderScope ~ (bindings ++ selectScope)
+              , bindings ~ (atLeastOneBinding ': xs)
               )
            => Columns selectScope bindings
-           -> Proxy table -- ^ FROM
-           -> Maybe (Proxy tableAlias) -- ^ alias
+           -> Sym table -- ^ FROM
+           -> Maybe (Sym tableAlias) -- ^ alias
            -> Maybe (Expr selectScope Bool) -- ^ WHERE
            -> [OrderBy orderScope]
            -> Select scope bindings
+
+instance Show (Select scope bindings) where
+    showsPrec p' (Select columns table alias cond order) = showParen (p' > 2) $
+        let p = 3 in
+        showString "SELECT " .
+        showsPrec p columns . 
+        showString " FROM " .
+        showSymbol table .
+        maybe id ((showChar ' ' .) . showSymbol) alias .
+        maybe id ((showString " WHERE " .) . showsPrec p) cond .
+        (case order of
+            [] -> id
+            (_:_) -> showString " ORDER BY " .
+                foldr1 (\a b -> a . showString ", " . b) (map (showsPrec p) order)
+        )
 
 type AppScope = '[UsersTable]
 type UsersTable = Table' "users"
@@ -106,11 +157,11 @@ type UsersTable = Table' "users"
 -- ORDER BY username DESC
 example :: Select AppScope '[Binding "user_id" Int, Binding "username" String]
 example = Select
-    (ColCons (Proxy :: Proxy "user_id") (Var (Proxy :: Proxy "id")) $
-     ColCons (Proxy :: Proxy "username")
-        (Col (Proxy :: Proxy "fancy_alias_for_users") (Proxy :: Proxy "name")) $
+    (ColCons (Sym :: Sym "user_id") (Var (Sym :: Sym "id")) $
+     ColCons (Sym :: Sym "username")
+        (Col (Sym :: Sym "fancy_alias_for_users") (Sym :: Sym "name")) $
     ColNil)
-    {-FROM-} (Proxy :: Proxy "users")
-    (Just {-AS-} (Proxy :: Proxy "fancy_alias_for_users"))
-    (Just {-WHERE-} (Var (Proxy :: Proxy "admin")))
-    [Asc (Var (Proxy :: Proxy "username"))]
+    {-FROM-} (Sym :: Sym "users")
+    (Just {-AS-} (Sym :: Sym "fancy_alias_for_users"))
+    (Just {-WHERE-} (Var (Sym :: Sym "admin")))
+    [Asc (Var (Sym :: Sym "username"))]
