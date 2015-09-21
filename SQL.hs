@@ -41,16 +41,34 @@ type family (||) (a :: Bool) (b :: Bool) where
 
 data Operator a b c where
     Eq :: Operator a a Bool
+    Add :: Operator Int Int Int
+    -- TODO
 
 data Expr (scope :: [*]) a where
+    -- A constant
     Const :: a -> Expr scope a
+
+    -- Variable selector. Requires the variable to be in scope
     Var :: (KnownSymbol name, HasVar name scope)
         => Proxy name
         -> Expr scope (VarType name scope)
+
+    -- Column selector "table.col". Requires table to be in scope and have given column.
+    Col :: ( KnownSymbol table, KnownSymbol col
+           , Table table columns scope
+           , HasVar col columns
+           )
+        => Proxy table
+        -> Proxy col
+        -> Expr scope (VarType col columns)
+
+    -- Operator. Reuires types to match.
     Op :: Operator a b c
        -> Expr scope a
        -> Expr scope b
        -> Expr scope c
+
+    -- Subquery. Requires the query to have only one column.
     SubSelect :: Select scope '[Binding whatever a] -> Expr scope (Maybe a)
 
 data Columns (scope :: [*]) (bindings :: [*]) where
@@ -82,12 +100,17 @@ type UsersTable = Table' "users"
      , Binding "admin" Bool
      ]
 
+-- SELECT id AS user_id, fancy_alias_for_users.name AS username
+-- FROM users AS fancy_alias_for_users
+-- WHERE admin
+-- ORDER BY username DESC
 example :: Select AppScope '[Binding "user_id" Int, Binding "username" String]
 example = Select
     (ColCons (Proxy :: Proxy "user_id") (Var (Proxy :: Proxy "id")) $
-     ColCons (Proxy :: Proxy "username") (Var (Proxy :: Proxy "name")) $
+     ColCons (Proxy :: Proxy "username")
+        (Col (Proxy :: Proxy "fancy_alias_for_users") (Proxy :: Proxy "name")) $
     ColNil)
     {-FROM-} (Proxy :: Proxy "users")
-    Nothing
+    (Just {-AS-} (Proxy :: Proxy "fancy_alias_for_users"))
     (Just {-WHERE-} (Var (Proxy :: Proxy "admin")))
     [Asc (Var (Proxy :: Proxy "username"))]
