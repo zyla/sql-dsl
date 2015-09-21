@@ -61,11 +61,18 @@ data Columns (scope :: [*]) (bindings :: [*]) where
             -> Columns scope bindings
             -> Columns scope (Binding name a ': bindings)
 
+data OrderBy scope = forall a. Asc (Expr scope a) | forall a. Desc (Expr scope a)
+
 data Select (scope :: [*]) (a :: [*]) where
-    Select :: Table table tableColumns scope
-           => Columns (tableColumns ++ scope) bindings
+    Select :: ( Table table tableColumns scope
+              , selectScope ~ (Table' tableAlias tableColumns ': (tableColumns ++ scope))
+              , orderScope ~ (bindings ++ selectScope)
+              )
+           => Columns selectScope bindings
            -> Proxy table -- ^ FROM
-           -> Maybe (Expr (tableColumns ++ scope) Bool) -- ^ WHERE
+           -> Maybe (Proxy tableAlias) -- ^ alias
+           -> Maybe (Expr selectScope Bool) -- ^ WHERE
+           -> [OrderBy orderScope]
            -> Select scope bindings
 
 type AppScope = '[UsersTable]
@@ -81,5 +88,6 @@ example = Select
      ColCons (Proxy :: Proxy "username") (Var (Proxy :: Proxy "name")) $
     ColNil)
     {-FROM-} (Proxy :: Proxy "users")
+    Nothing
     (Just {-WHERE-} (Var (Proxy :: Proxy "admin")))
-
+    [Asc (Var (Proxy :: Proxy "username"))]
