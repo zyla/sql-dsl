@@ -1,43 +1,45 @@
-{-# LANGUAGE UndecidableInstances, ConstraintKinds, GADTs, TypeFamilies, ScopedTypeVariables, FlexibleInstances, DataKinds, MultiParamTypeClasses, TypeOperators #-}
+{-# LANGUAGE UndecidableInstances, PolyKinds, ConstraintKinds, GADTs, TypeFamilies, ScopedTypeVariables, FlexibleInstances, DataKinds, MultiParamTypeClasses, TypeOperators #-}
 
 import Text.Show
 import GHC.TypeLits
 
 data Binding (name :: Symbol) a
-data Table' (name :: Symbol) (columns :: [*])
+data Table (name :: Symbol) (columns :: [*])
+data BoundTable (name :: Symbol) (columns :: [*])
+
+data Found (a :: k)
+data VarNotFound name
+data TableNotFound name
 
 type family VarType name scope :: * where
-    VarType name (Binding name a ': scope) = a
+    VarType name (Binding name a ': scope) = Found a
+    VarType name (Table tableName columns ': scope) = VarType name columns ||. VarType name scope
     VarType name (b ': scope) = VarType name scope
+    VarType name s = VarNotFound name
 
-type family HasVar' name scope :: Bool where
-    HasVar' name (Binding name a ': scope) = True
-    HasVar' name (Table' tableName columns ': scope) = HasVar' name columns || HasVar' name scope
-    HasVar' name (b ': scope) = HasVar' name scope
-    HasVar' name s = False
+type Var name a scope = VarType name scope ~ Found a
 
-type HasVar name scope = HasVar' name scope ~ True
-
-type family TableColumns (table :: Symbol) (scope :: [*]) :: [*] where
-    TableColumns name (Table' name columns ': scope) = columns
+type family TableColumns (table :: Symbol) (scope :: [*]) :: * where
+    TableColumns name (Table name columns ': scope) = Found columns
     TableColumns name (b ': scope) = TableColumns name scope
+    TableColumns name s = TableNotFound name
 
-type Table table columns scope = (HasTable table scope, TableColumns table scope ~ columns)
+type IsTable table columns scope = TableColumns table scope ~ Found columns
 
-type family HasTable' name scope :: Bool where
-    HasTable' name (Table' name a ': scope) = True
-    HasTable' name (b ': scope) = HasTable' name scope
-    HasTable' name s = False
+type family BoundTableColumns (table :: Symbol) (scope :: [*]) :: * where
+    BoundTableColumns name (BoundTable name columns ': scope) = Found columns
+    BoundTableColumns name (b ': scope) = BoundTableColumns name scope
+    BoundTableColumns name s = TableNotFound name
 
-type HasTable name scope = HasTable' name scope ~ True
+type IsBoundTable table columns scope = BoundTableColumns table scope ~ Found columns
 
 type family (++) (a :: [*]) (b :: [*]) where
     '[] ++ xs = xs
     (x ': xs) ++ ys = x ': (xs ++ ys)
 
-type family (||) (a :: Bool) (b :: Bool) where
-    True || x = True
-    False || x = x
+type family (||.) a b where
+    Found a ||. x = Found a
+    notFound ||. x = x
 
 data Operator a b c where
     Eq :: Operator a a Bool
@@ -59,17 +61,17 @@ data Expr (scope :: [*]) a where
           -> Expr scope a
 
     -- Variable selector. Requires the variable to be in scope
-    Var :: HasVar name scope
+    Var :: Var name a scope
         => Sym name
-        -> Expr scope (VarType name scope)
+        -> Expr scope a
 
     -- Column selector "table.col". Requires table to be in scope and have given column.
-    Col :: ( Table table columns scope
-           , HasVar col columns
+    Col :: ( IsBoundTable table columns scope
+           , Var col a columns
            )
         => Sym table
         -> Sym col
-        -> Expr scope (VarType col columns)
+        -> Expr scope a
 
     -- Operator. Reuires types to match.
     Op :: Operator a b c
@@ -117,8 +119,8 @@ instance Show (OrderBy scope) where
     showsPrec p (Desc expr) = showsPrec p expr . showString " DESC"
 
 data Select (scope :: [*]) (a :: [*]) where
-    Select :: ( Table table tableColumns scope
-              , selectScope ~ (Table' tableAlias tableColumns ': (tableColumns ++ scope))
+    Select :: ( IsTable table tableColumns scope
+              , selectScope ~ (BoundTable tableAlias tableColumns ': (tableColumns ++ scope))
               , orderScope ~ (bindings ++ selectScope)
               , bindings ~ (atLeastOneBinding ': xs)
               )
@@ -145,7 +147,7 @@ instance Show (Select scope bindings) where
         )
 
 type AppScope = '[UsersTable]
-type UsersTable = Table' "users"
+type UsersTable = Table "users"
     '[ Binding "id" Int
      , Binding "name" String
      , Binding "admin" Bool
