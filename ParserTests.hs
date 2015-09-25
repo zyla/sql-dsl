@@ -48,4 +48,39 @@ exprTests = map (test expr)
   , ("(2 + 5) * 7", Just (Op Mul (Op Add (LitNumber 2) (LitNumber 5)) (LitNumber 7)))
   ]
 
-main = mapM_ runTests [exprTests]
+selectTests = map (test selectClause)
+  [ ("", Nothing)
+  , ("SELECT 1", Just $ Select [ExprTarget (LitNumber 1) Nothing] [] Nothing [])
+  , ("SELECT foo FROM bar", Just $
+      Select [ExprTarget (Var "foo") Nothing]
+        [TableRef "bar" Nothing] Nothing [])
+  , ("SELECT foo, bar FROM baz, thud xyzzy", Just $
+      Select [ExprTarget (Var "foo") Nothing, ExprTarget (Var "bar") Nothing]
+        [TableRef "baz" Nothing, TableRef "thud" (Just "xyzzy")] Nothing [])
+  ]
+
+otherTests = map (test tableRef)
+  [ ("foo", Just (TableRef "foo" Nothing))
+  , ("foo AS bar", Just (TableRef "foo" (Just "bar")))
+  , ("foo bar", Just (TableRef "foo" (Just "bar")))
+  ] ++ map (test sortClause)
+  [ ("ORDER BY ", Nothing)
+  , ("ORDER BY foo", Just [SortBy Asc (Var "foo")])
+  , ("ORDER BY foo desc, bar", Just [SortBy Desc (Var "foo"), SortBy Asc (Var "bar")])
+  ] ++ map (test identifier)
+  [ ("ORDER", Nothing)
+  , ("ORDERfoo", Just "ORDERfoo")
+  , ("select", Nothing)
+  , ("FROM", Nothing)
+  , ("bar", Just "bar")
+  ] ++ map (test fromClause)
+  [ ("FROM foo", Just $ [TableRef "foo" Nothing])
+  , ("FROM FROM", Nothing)
+  ] ++ map (test $ sqlKeyword "FROM" >> identifier)
+  [ ("FROM foo", Just "foo")
+  , ("From bar", Just "bar")
+  , ("FROMwat foo", Nothing)
+  , ("wat man", Nothing)
+  ]
+
+main = mapM_ runTests [exprTests, selectTests, otherTests]

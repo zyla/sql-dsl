@@ -7,6 +7,11 @@ import Text.Parsec.String
 import Text.Parsec.Expr
 import Text.ParserCombinators.Parsec.Number
 import Data.Char
+import Data.Maybe
+import Control.Monad
+
+keywords = words $ "SELECT FROM WHERE ORDER ASC DESC"
+anyKeyword = choice $ map sqlKeyword keywords
 
 expr :: Parser Expr
 expr = buildExpressionParser table term
@@ -16,6 +21,9 @@ parens expr = lexeme (char '(') *> expr <* lexeme (char ')')
 term = parens expr <|> litNumber <|> litString <|> var
 
 lexeme p = p <* many (satisfy isSpace)
+
+sqlKeyword = lexeme . mapM (\c -> oneOf [toLower c, toUpper c])
+sqlKeywords = mapM sqlKeyword . words
 
 litNumber = lexeme $ LitNumber <$> decimal
 
@@ -33,10 +41,43 @@ var = do
     first <- identifier
     try (Col first <$> (lexeme (char '.') >> identifier)) <|> return (Var first)
 
-identifier = lexeme $ many1 $ satisfy isAlpha
+identifier = lexeme $ do
+  id <- many1 identifierChar <?> "identifier"
+  when (map toUpper id `elem` keywords) $
+    unexpected $ show id
+  return id
+
+identifierChar = satisfy isAlpha  
 
 table   = [ [binary "*" Mul, binary "/" Div ]
           , [binary "+" Add, binary "-" Sub ]
           ]
   where
     binary str op = Infix (lexeme (string str) >> return (Op op)) AssocLeft
+
+selectClause = sqlKeyword "SELECT" >>
+    Select <$> sepBy1 (try resultTarget) comma
+           <*> option [] fromClause
+           <*> optionMaybe whereClause
+           <*> option [] sortClause
+
+resultTarget = (ExprTarget <$> expr <*> optionMaybe (try identifier)) <?> "result target"
+
+fromClause = sqlKeyword "FROM" >> sepBy1 tableRef comma
+
+tableRef = do
+    name <- identifier
+    alias <- optionMaybe $ optional (sqlKeyword "AS") >> identifier
+    return $ TableRef name alias
+
+whereClause = sqlKeyword "WHERE" >> expr
+
+comma = lexeme $ char ','
+
+sortClause = sqlKeywords "ORDER BY" >> sepBy1 sortBy comma
+  where
+    sortBy = do
+        e <- expr
+        t <- option Asc sortByType
+        return $ SortBy t e
+    sortByType = (sqlKeyword "ASC" >> return Asc) <|> (sqlKeyword "DESC" >> return Desc)
