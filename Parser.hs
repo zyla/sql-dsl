@@ -41,6 +41,8 @@ var = do
     first <- identifier
     try (Col first <$> (lexeme (char '.') >> identifier)) <|> return (Var first)
 
+whitespace = many (satisfy isSpace)
+
 identifier = lexeme $ do
   id <- many1 identifierChar <?> "identifier"
   when (map toUpper id `elem` keywords) $
@@ -61,13 +63,15 @@ selectClause = sqlKeyword "SELECT" >>
            <*> optionMaybe whereClause
            <*> option [] sortClause
 
-resultTarget = (ExprTarget <$> expr <*> optionMaybe (try identifier)) <?> "result target"
+resultTarget = (ExprTarget
+    <$> expr
+    <*> optionMaybe (try $ optional (sqlKeyword "AS") >> identifier)) <?> "result target"
 
-fromClause = sqlKeyword "FROM" >> sepBy1 tableRef comma
+fromClause = sqlKeyword "FROM" >> sepBy1 tableRef (try comma)
 
 tableRef = do
     name <- identifier
-    alias <- optionMaybe $ optional (sqlKeyword "AS") >> identifier
+    alias <- optionMaybe $ try $ optional (sqlKeyword "AS") >> identifier
     return $ TableRef name alias
 
 whereClause = sqlKeyword "WHERE" >> expr
@@ -81,3 +85,5 @@ sortClause = sqlKeywords "ORDER BY" >> sepBy1 sortBy comma
         t <- option Asc sortByType
         return $ SortBy t e
     sortByType = (sqlKeyword "ASC" >> return Asc) <|> (sqlKeyword "DESC" >> return Desc)
+
+parseSelect = parse (whitespace *> selectClause <* eof) ""

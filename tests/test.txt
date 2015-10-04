@@ -1,0 +1,15 @@
+:l TH
+:set -XDataKinds -XQuasiQuotes
+
+:t [sql|SELECT 1 foo|]
+  :: (Num a, Show a) => SQL.Select scope '[Binding "foo" a]
+
+:t [sql|SELECT baz qux FROM foo WHERE bar ORDER BY baz|]
+  :: ((VarType "baz" columns ||. VarNotFound "baz") ~ Found a,
+      (VarType "baz" columns ||. VarNotFound "baz") ~ Found a1,
+      TableColumns "foo" scope ~ Found columns,
+      (VarType "bar" columns ||. VarNotFound "bar") ~ Found Bool) =>
+     SQL.Select scope '[Binding "qux" a]
+
+:kind! VarType "foo" '[Binding "foo" Integer]
+  = Found Integer

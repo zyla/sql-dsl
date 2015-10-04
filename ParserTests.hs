@@ -11,8 +11,6 @@ getFailure :: Result -> Maybe String
 getFailure (Failed msg) = Just msg
 getFailure _ = Nothing
 
-whitespace = many (satisfy isSpace)
-
 test :: (Show a, Eq a) => Parser a -> (String, Maybe a) -> Result
 test parser (input, expected) =
     let parseResult = parse (whitespace *> parser <* eof) "" input
@@ -54,9 +52,16 @@ selectTests = map (test selectClause)
   , ("SELECT foo FROM bar", Just $
       Select [ExprTarget (Var "foo") Nothing]
         [TableRef "bar" Nothing] Nothing [])
+  , ("SELECT 1 AS foo FROM bar", Just $
+      Select [ExprTarget (LitNumber 1) (Just "foo")]
+        [TableRef "bar" Nothing] Nothing [])
   , ("SELECT foo, bar FROM baz, thud xyzzy", Just $
       Select [ExprTarget (Var "foo") Nothing, ExprTarget (Var "bar") Nothing]
         [TableRef "baz" Nothing, TableRef "thud" (Just "xyzzy")] Nothing [])
+  , ("SELECT foo FROM bar WHERE baz", Just $
+      Select [ExprTarget (Var "foo") Nothing]
+        [TableRef "bar" Nothing]
+        (Just $ Var "baz") [])
   ]
 
 otherTests = map (test tableRef)

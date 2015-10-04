@@ -1,5 +1,7 @@
 {-# LANGUAGE UndecidableInstances, PolyKinds, ConstraintKinds, GADTs, TypeFamilies, ScopedTypeVariables, FlexibleInstances, DataKinds, MultiParamTypeClasses, TypeOperators #-}
+module SQL where
 
+import Data.List
 import Text.Show
 import GHC.TypeLits
 
@@ -13,7 +15,7 @@ data TableNotFound name
 
 type family VarType name scope :: * where
     VarType name (Binding name a ': scope) = Found a
-    VarType name (Table tableName columns ': scope) = VarType name columns ||. VarType name scope
+    VarType name (BoundTable tableName columns ': scope) = VarType name columns ||. VarType name scope
     VarType name (b ': scope) = VarType name scope
     VarType name s = VarNotFound name
 
@@ -119,32 +121,58 @@ instance Show (OrderBy scope) where
     showsPrec p (Desc expr) = showsPrec p expr . showString " DESC"
 
 data Select (scope :: [*]) (a :: [*]) where
-    Select :: ( IsTable table tableColumns scope
-              , selectScope ~ (BoundTable tableAlias tableColumns ': (tableColumns ++ scope))
-              , orderScope ~ (bindings ++ selectScope)
+    Select :: ( orderScope ~ (bindings ++ selectScope)
               , bindings ~ (atLeastOneBinding ': xs)
               )
            => Columns selectScope bindings
-           -> Sym table -- ^ FROM
-           -> Maybe (Sym tableAlias) -- ^ alias
+           -> FromClause scope selectScope
            -> Maybe (Expr selectScope Bool) -- ^ WHERE
            -> [OrderBy orderScope]
            -> Select scope bindings
 
+data FromClause (scope :: [*]) (outScope :: [*]) where
+    FromNil :: FromClause scope '[]
+    FromTable
+        :: (IsTable table columns scope)
+        => Sym table
+        -> FromClause scope outScope
+        -> FromClause scope (BoundTable table columns ': outScope)
+    FromTableAlias
+        :: (IsTable table columns scope)
+        => Sym table
+        -> Sym alias
+        -> FromClause scope outScope
+        -> FromClause scope (BoundTable table columns ': BoundTable alias columns ': outScope)
+    FromSubSelect
+        :: Sym alias
+        -> Select scope columns
+        -> FromClause scope outScope
+        -> FromClause scope (BoundTable alias columns ': outScope)
+
 instance Show (Select scope bindings) where
-    showsPrec p' (Select columns table alias cond order) = showParen (p' > 2) $
+    showsPrec p' (Select columns fromClause cond order) = showParen (p' > 2) $
         let p = 3 in
         showString "SELECT " .
         showsPrec p columns . 
-        showString " FROM " .
-        showSymbol table .
-        maybe id ((showChar ' ' .) . showSymbol) alias .
+        showFrom .
         maybe id ((showString " WHERE " .) . showsPrec p) cond .
         (case order of
             [] -> id
             (_:_) -> showString " ORDER BY " .
                 foldr1 (\a b -> a . showString ", " . b) (map (showsPrec p) order)
         )
+      where
+        showFrom = case fromEntries fromClause of
+            [] -> id
+            xs -> showString " FROM " . foldr1 (.) (intersperse (showString ", ") xs)
+
+fromEntries :: FromClause scope outScope -> [ShowS]
+fromEntries FromNil = []
+fromEntries (FromTable sym xs) = showSymbol sym : fromEntries xs
+fromEntries (FromTableAlias sym alias xs) =
+    (showSymbol sym . showChar ' ' . showSymbol alias) : fromEntries xs
+fromEntries (FromSubSelect alias select xs) =
+    (showsPrec 9 select . showChar ' ' . showSymbol alias) : fromEntries xs
 
 type AppScope = '[UsersTable]
 type UsersTable = Table "users"
@@ -163,7 +191,6 @@ example = Select
      ColCons (Sym :: Sym "username")
         (Col (Sym :: Sym "fancy_alias_for_users") (Sym :: Sym "name")) $
     ColNil)
-    {-FROM-} (Sym :: Sym "users")
-    (Just {-AS-} (Sym :: Sym "fancy_alias_for_users"))
+    (FromTableAlias (Sym :: Sym "users") (Sym :: Sym "fancy_alias_for_users") FromNil)
     (Just {-WHERE-} (Var (Sym :: Sym "admin")))
     [Asc (Var (Sym :: Sym "username"))]
