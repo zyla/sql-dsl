@@ -43,9 +43,20 @@ type family (||.) a b where
     Found a ||. x = Found a
     notFound ||. x = x
 
+type family FromMaybe a where
+    FromMaybe (Maybe a) = a
+    FromMaybe a = a
+
+type family MaybeOp a b r where
+    MaybeOp (Maybe a) b r = Maybe r
+    MaybeOp a (Maybe b) r = Maybe r
+    MaybeOp a b r = r
+
 data Operator a b c where
-    Eq :: Operator a a Bool
-    Add :: Operator Int Int Int
+    Eq :: (FromMaybe a ~ FromMaybe b)
+       => Operator a b Bool
+    Add :: (FromMaybe a ~ Int, FromMaybe b ~ Int)
+        => Operator a b (MaybeOp a b Int)
     -- TODO
 
 opPrec :: Operator a b c -> Int
@@ -179,17 +190,28 @@ type UsersTable = Table "users"
     '[ Binding "id" Int
      , Binding "name" String
      , Binding "admin" Bool
+     , Binding "likes" (Maybe Int)
      ]
 
 -- SELECT id AS user_id, fancy_alias_for_users.name AS username
 -- FROM users AS fancy_alias_for_users
 -- WHERE admin
 -- ORDER BY username DESC
-example :: Select AppScope '[Binding "user_id" Int, Binding "username" String]
+example :: Select AppScope
+    '[ Binding "user_id" Int
+     , Binding "username" String
+     , Binding "likes" (Maybe Int)
+     ]
+
 example = Select
     (ColCons (Sym :: Sym "user_id") (Var (Sym :: Sym "id")) $
      ColCons (Sym :: Sym "username")
         (Col (Sym :: Sym "fancy_alias_for_users") (Sym :: Sym "name")) $
+     ColCons (Sym :: Sym "likes")
+        (Op Add (Var (Sym :: Sym "likes"))
+            (Var (Sym :: Sym "id"))
+            )
+        $
     ColNil)
     (FromTableAlias (Sym :: Sym "users") (Sym :: Sym "fancy_alias_for_users") FromNil)
     (Just {-WHERE-} (Var (Sym :: Sym "admin")))
