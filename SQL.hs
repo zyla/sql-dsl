@@ -10,8 +10,9 @@ data Table (name :: Symbol) (columns :: [*])
 data BoundTable (name :: Symbol) (columns :: [*])
 
 data Found (a :: k)
-data VarNotFound name
-data TableNotFound name
+data NotFound
+type family VarNotFound name where VarNotFound name = NotFound
+type family TableNotFound name where TableNotFound name = NotFound
 
 type family VarType name scope :: * where
     VarType name (Binding name a ': scope) = Found a
@@ -19,21 +20,38 @@ type family VarType name scope :: * where
     VarType name (b ': scope) = VarType name scope
     VarType name s = VarNotFound name
 
-type Var name a scope = VarType name scope ~ Found a
+type family SymbolNotFoundError name scope where
+  SymbolNotFoundError name scope = TypeError
+    (Text "Symbol " :<>: ShowType name :<>: Text " not found\n      in the environment:\n" :<>: FormatEnv scope)
+
+type family FoundOr found name scope where
+  FoundOr (Found val) name scope = Found val
+  FoundOr NotFound name scope = SymbolNotFoundError name scope
+
+type family FormatEnv env where
+  FormatEnv (Binding name typ ': xs) =
+    Text "\n        " :<>: Text name :<>: Text " :: " :<>: ShowType typ :<>: FormatEnv xs
+  FormatEnv (BoundTable table (Binding name typ ': cols) ': xs) =
+    Text "\n        " :<>: Text table :<>: Text "." :<>:
+      Text name :<>: Text " :: " :<>: ShowType typ :<>: FormatEnv (BoundTable table cols ': xs)
+  FormatEnv (BoundTable table '[] ': xs) = FormatEnv xs
+  FormatEnv '[] = Text "\n"
+
+type Var name a scope = FoundOr (VarType name scope) name scope ~ Found a
 
 type family TableColumns (table :: Symbol) (scope :: [*]) :: * where
     TableColumns name (Table name columns ': scope) = Found columns
     TableColumns name (b ': scope) = TableColumns name scope
     TableColumns name s = TableNotFound name
 
-type IsTable table columns scope = TableColumns table scope ~ Found columns
+type IsTable table columns scope = FoundOr (TableColumns table scope) table scope ~ Found columns
 
 type family BoundTableColumns (table :: Symbol) (scope :: [*]) :: * where
     BoundTableColumns name (BoundTable name columns ': scope) = Found columns
     BoundTableColumns name (b ': scope) = BoundTableColumns name scope
     BoundTableColumns name s = TableNotFound name
 
-type IsBoundTable table columns scope = BoundTableColumns table scope ~ Found columns
+type IsBoundTable table columns scope = FoundOr (BoundTableColumns table scope) table scope ~ Found columns
 
 type family (++) (a :: [*]) (b :: [*]) where
     '[] ++ xs = xs
