@@ -19,7 +19,7 @@ executable sqltc
   main-is:             Main.hs
   -- other-modules:       
   other-extensions:    UndecidableInstances, PolyKinds, ConstraintKinds, GADTs, TypeFamilies, ScopedTypeVariables, FlexibleInstances, DataKinds, MultiParamTypeClasses, TypeOperators
-  build-depends:       base >=4.8 && <4.9
+  build-depends:       base
                      , parsec
                      , parsec-numbers
                      , template-haskell
