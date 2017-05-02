@@ -10,7 +10,7 @@ import Data.Char
 import Data.Maybe
 import Control.Monad
 
-keywords = words $ "SELECT FROM WHERE ORDER ASC DESC"
+keywords = words $ "SELECT FROM WHERE ORDER ASC DESC AND OR"
 anyKeyword = choice $ map sqlKeyword keywords
 
 expr :: Parser Expr
@@ -49,13 +49,16 @@ identifier = lexeme $ do
     unexpected $ show id
   return id
 
-identifierChar = satisfy isAlpha  
+identifierChar = satisfy isAlpha <|> char '_'
 
 table   = [ [binary "*" Mul, binary "/" Div ]
           , [binary "+" Add, binary "-" Sub ]
+          , [binary "=" Eq ]
+          , [binary "AND" And ]
+          , [binary "OR" Or ]
           ]
   where
-    binary str op = Infix (lexeme (string str) >> return (Op op)) AssocLeft
+    binary str op = Infix (try (lexeme (string str)) >> return (Op op)) AssocLeft
 
 selectClause = sqlKeyword "SELECT" >>
     Select <$> sepBy1 (try resultTarget) comma

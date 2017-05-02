@@ -41,8 +41,14 @@ mkColumns (ExprTarget expr (Just alias):xs) =
     [|SQL.ColCons $(mkSym alias) $(liftExpr expr) $(mkColumns xs)|]
 
 liftExpr :: AST.Expr -> Q Exp
-liftExpr (LitNumber x) = [|SQL.Const $(lift x)|]
+liftExpr (LitNumber x) = [|SQL.Const x|]
 liftExpr (AST.Var x) = [|SQL.Var $(mkSym x)|]
+liftExpr (AST.Col table col) = [|SQL.Col $(mkSym table) $(mkSym col)|]
+liftExpr (AST.Op op x1 x2) = [|SQL.Op $(liftOp op) $(liftExpr x1) $(liftExpr x2)|]
+
+liftOp :: AST.Operator -> Q Exp
+liftOp AST.Eq = [|SQL.Eq|]
+liftOp AST.And = [|SQL.And|]
 
 ordToTH (SortBy AST.Asc expr) = [|SQL.Asc $(liftExpr expr)|]
 ordToTH (SortBy AST.Desc expr) = [|SQL.Desc $(liftExpr expr)|]

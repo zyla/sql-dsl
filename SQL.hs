@@ -57,15 +57,23 @@ data Operator a b c where
        => Operator a b Bool
     Add :: (FromMaybe a ~ Int, FromMaybe b ~ Int)
         => Operator a b (MaybeOp a b Int)
+    And :: (FromMaybe a ~ Bool, FromMaybe b ~ Bool)
+        => Operator a b (MaybeOp a b Bool)
+    Or :: (FromMaybe a ~ Bool, FromMaybe b ~ Bool)
+        => Operator a b (MaybeOp a b Bool)
     -- TODO
 
 opPrec :: Operator a b c -> Int
-opPrec Eq = 1
-opPrec Add = 2
+opPrec Or = 1
+opPrec And = 2
+opPrec Eq = 3
+opPrec Add = 4
 
 opString :: Operator a b c -> String
 opString Eq = "="
 opString Add = "+"
+opString And = "AND"
+opString Or = "OR"
 
 data Expr (scope :: [*]) a where
     -- A constant
